@@ -1,56 +1,153 @@
 # CrockerLabMolecularTBI
-Data analysis &amp; output display for the molecular TBI project
 
+Pipeline for aligning Drosophila brain image stacks to a template and measuring fluorescence intensity in predefined ROIs.
 
-for now Im just gonna place whatever I had coded up previously in here, it is a very simple code though!
+---
 
-import pandas as pd
-import glob
-import os
+## Overview
 
-#look 4 CSV files
-files = glob.glob("data/*.csv")
-print("Found files:", files)
+This notebook workflow replaces a manual Fiji process for analyzing many brains consistently.
 
-data = []
+The pipeline:
 
-#extract mean
-for f in files:
-    fname = f.lower()
-    if "green" in fname:
-        channel = "green"
-    elif "red" in fname:
-        channel = "red"
-    else:
-        continue
-    
-    df_csv = pd.read_csv(f)
-    mean_int = df_csv["Mean"].iloc[0]  # first row of Mean column
-    brain_id = f.split("/")[-1].split("_")[0]
+* Loads TIFF z-stacks for a brain
+* Builds max-intensity projections for each channel
+* Aligns the brain to a template using rigid (PCA / center-of-mass) alignment
+* Applies predefined ROI masks
+* Measures fluorescence intensity within each ROI
+* Computes green/red intensity ratios
 
-    data.append({
-        "brain": brain_id,
-        "channel": channel,
-        "mean_intensity": mean_int
-    })
+Main analysis notebook:
 
-#data is collected
-df_all = pd.DataFrame(data)
+```
+brain_roi_measure_current.ipynb
+```
 
-#Pivot so we have one row per brain, columns = channels
-pivot = df_all.pivot(index="brain", columns="channel", values="mean_intensity")
+---
 
-#Compute Red / Green ratio
-pivot["R_G_ratio"] = pivot["red"] / pivot["green"]
+## Repository Structure
 
-output_file = "red_green_ratios.csv"
+```
+CrockerLabMolecularTBI/
+│
+├── roi_masks/
+│   ├── AL_left.npy
+│   ├── AL_right.npy
+│   ├── CX.npy
+│   ├── MB_left.npy
+│   ├── MB_right.npy
+│   ├── PI.npy
+│   ├── SEG.npy
+│   └── registration_core.npy
+│
+├── template_data/
+│   └── template_reg_img.npy
+│
+├── brain_roi_measure_current.ipynb
+├── brain_roi_measure.ipynb
+├── app.py
+├── requirements.txt
+└── README.md
+```
 
-if os.path.exists(output_file):
-    existing = pd.read_csv(output_file, index_col="brain")
-    #Append new brains (no duplicates)
-    pivot = pd.concat([existing, pivot])
-    pivot = pivot[~pivot.index.duplicated(keep="last")]
+---
 
-#updated CSV
-pivot.to_csv(output_file)
-print("\nSaved/updated file:", output_file)
+## Local Data Structure
+
+Raw microscopy data are expected locally and are **not stored in the repository**.
+
+```
+data/
+├── template_brain/
+│   └── template_image.tif
+│
+└── brains/
+    ├── brain_001/
+    │   ├── *_C002Z001.tif
+    │   ├── *_C002Z002.tif
+    │   ├── ...
+    │   ├── *_C003Z001.tif
+    │   └── ...
+    └── brain_002/
+```
+
+---
+
+## Running the Pipeline
+
+1. Open the notebook:
+
+```
+brain_roi_measure_current.ipynb
+```
+
+2. Set the brain directory:
+
+```python
+TEST_BRAIN_DIR = Path("data/brains/<brain_folder>")
+```
+
+3. Run the analysis cells in order to:
+
+* load stacks
+* compute projections
+* align to template
+* measure ROI intensities
+
+---
+
+## Channels
+
+The notebook currently assumes:
+
+```
+C002 = green
+C003 = red
+```
+
+Channel assignments may vary between acquisitions. Some datasets may contain empty channels.
+
+---
+
+## ROI Masks
+
+ROI masks are stored as `.npy` files in:
+
+```
+roi_masks/
+```
+
+`registration_core.npy` is used only for alignment and is not included in final measurements.
+
+---
+
+## Output
+
+For each ROI the notebook computes:
+
+* `green_max`
+* `red_max`
+* `green_red_ratio`
+
+Example output:
+
+| roi | green_max | red_max | green_red_ratio |
+|-----|-----------|---------|-----------------|
+
+---
+
+## Installation
+
+Install dependencies with:
+
+```
+pip install -r requirements.txt
+```
+
+---
+
+## Notes
+
+* Raw TIFF data are large and should remain local
+* ROI masks and template files should remain version controlled
+* Alignment is currently rigid (no deformable registration)
