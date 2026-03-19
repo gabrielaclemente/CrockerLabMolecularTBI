@@ -8,7 +8,6 @@ import pandas as pd
 brains_dir = '/Users/gabrielacmclemente/Library/CloudStorage/GoogleDrive-gclemente@middlebury.edu/My Drive/Molecular TBI - Crocker Lab/brain_folder'
 results_dir = "results"
 
-# Make results directory if it doesn't exist
 os.makedirs(results_dir, exist_ok=True)
 
 print("Scanning for brain folders...\n")
@@ -21,7 +20,7 @@ for root, dirs, files in os.walk(brains_dir):
 
 print(f"Found {len(all_brain_paths)} brain folders.\n")
 
-# Function to parse metadata from folder name
+
 def parse_brain_name(name):
     parts = name.lower().split("_")
     return {
@@ -32,12 +31,13 @@ def parse_brain_name(name):
         "InjuryType": next((p for p in parts if p in ["single", "double"]), "unknown")
     }
 
+
 all_tables = []
 
-# Process each brain folder using Papermill
-for brain_path in all_brain_paths:
+for i, brain_path in enumerate(all_brain_paths, 1):
+
     brain_name = os.path.basename(brain_path)
-    print(f"Processing: {brain_name}")
+    print(f"[{i}/{len(all_brain_paths)}] Processing: {brain_name}")
 
     output_notebook = os.path.join(results_dir, f"{brain_name}_roi.ipynb")
     output_csv = os.path.join(results_dir, f"{brain_name}_roi.csv")
@@ -55,12 +55,26 @@ for brain_path in all_brain_paths:
         if os.path.exists(output_csv):
             df = pd.read_csv(output_csv)
 
-            # Add metadata columns
+            df = df.rename(columns={
+                "roi": "ROI",
+                "green_max": "Green",
+                "red_max": "Red",
+                "green_red_ratio": "Green_Red_Ratio"
+            })
+
             meta = parse_brain_name(brain_name)
             for key, value in meta.items():
                 df[key] = value
 
             df["Brain"] = brain_name
+
+            desired_cols = [
+                "Brain", "ROI", "Green", "Red", "Green_Red_Ratio",
+                "Reporter", "Driver", "Marker", "Condition", "InjuryType"
+            ]
+
+            df = df[[c for c in desired_cols if c in df.columns]]
+
             all_tables.append(df)
 
         else:
@@ -69,11 +83,32 @@ for brain_path in all_brain_paths:
     except Exception as e:
         print(f"❌ Error processing {brain_name}: {e}")
 
-# Combine all CSVs into one Prism-ready table
+
+
 if all_tables:
+
     combined = pd.concat(all_tables, ignore_index=True)
-    output_file = os.path.join(results_dir, "prism_table.csv")
-    combined.to_csv(output_file, index=False)
-    print(f"\n✅ Finished! Combined Prism table saved to:\n{output_file}")
+
+    # Save long-format table (BEST for Prism stats & grouping)
+    long_output = os.path.join(results_dir, "prism_long_format.csv")
+    combined.to_csv(long_output, index=False)
+
+    print(f"\n✅ Long-format Prism table saved to:\n{long_output}")
+
+    try:
+        pivot = combined.pivot_table(
+            index="Brain",
+            columns="ROI",
+            values="Green_Red_Ratio"
+        )
+
+        pivot_output = os.path.join(results_dir, "prism_pivot.csv")
+        pivot.to_csv(pivot_output)
+
+        print(f"✅ Pivot (wide) table saved to:\n{pivot_output}")
+
+    except Exception as e:
+        print(f"⚠️ Could not create pivot table: {e}")
+
 else:
     print("\n⚠️ No data was processed.")
