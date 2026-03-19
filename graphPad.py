@@ -1,45 +1,79 @@
-#This will essentially be generating a table output in csv, which we will be able to plug directly into prism graphpad for image analysis
+# Batch ROI Processing Wrapper (Local Google Drive → Papermill → Prism CSV)
 
 import os
 import papermill as pm
 import pandas as pd
 
-brains_dir = "brains"
+# Local Google Drive folder path
+brains_dir = '/Users/gabrielacmclemente/Library/CloudStorage/GoogleDrive-gclemente@middlebury.edu/My Drive/Molecular TBI - Crocker Lab/brain_folder'
 results_dir = "results"
 
+# Make results directory if it doesn't exist
 os.makedirs(results_dir, exist_ok=True)
+
+print("Scanning for brain folders...\n")
+
+# Find all folders containing .tif files
+all_brain_paths = []
+for root, dirs, files in os.walk(brains_dir):
+    if any(f.endswith(".tif") for f in files):
+        all_brain_paths.append(root)
+
+print(f"Found {len(all_brain_paths)} brain folders.\n")
+
+# Function to parse metadata from folder name
+def parse_brain_name(name):
+    parts = name.lower().split("_")
+    return {
+        "Reporter": next((p for p in parts if "mito" in p), "unknown"),
+        "Driver": next((p for p in parts if p in ["repo", "nsyb"]), "unknown"),
+        "Marker": next((p for p in parts if p in ["draper", "stat"]), "unknown"),
+        "Condition": next((p for p in parts if p in ["control", "mild", "moderate", "severe"]), "unknown"),
+        "InjuryType": next((p for p in parts if p in ["single", "double"]), "unknown")
+    }
 
 all_tables = []
 
-for brain in os.listdir(brains_dir):
+# Process each brain folder using Papermill
+for brain_path in all_brain_paths:
+    brain_name = os.path.basename(brain_path)
+    print(f"Processing: {brain_name}")
 
-    brain_path = os.path.join(brains_dir, brain)
+    output_notebook = os.path.join(results_dir, f"{brain_name}_roi.ipynb")
+    output_csv = os.path.join(results_dir, f"{brain_name}_roi.csv")
 
-    if not os.path.isdir(brain_path):
-        continue
+    try:
+        pm.execute_notebook(
+            "brain_roi_measure_current.ipynb",
+            output_notebook,
+            parameters=dict(
+                brain_folder=brain_path,
+                output_csv=output_csv
+            )
+        )
 
-    print(f"Processing {brain}")
+        if os.path.exists(output_csv):
+            df = pd.read_csv(output_csv)
 
-    output_notebook = f"{results_dir}/{brain}_roi_output.ipynb"
+            # Add metadata columns
+            meta = parse_brain_name(brain_name)
+            for key, value in meta.items():
+                df[key] = value
 
-    #runs the ROI notebook
-    pm.execute_notebook(
-        "brain_roi_measure_current.ipynb",
-        output_notebook,
-        parameters=dict(brain_folder=brain_path)
-    )
+            df["Brain"] = brain_name
+            all_tables.append(df)
 
-    #assumes ROI notebook exports a CSV --> we are not there quite yet, I mean there is an output but yeah
-    csv_file = os.path.join(brain_path, "roi_results.csv")
+        else:
+            print(f"⚠️ No CSV output for {brain_name}")
 
-    if os.path.exists(csv_file):
-        df = pd.read_csv(csv_file)
-        df["Brain"] = brain
-        all_tables.append(df)
+    except Exception as e:
+        print(f"❌ Error processing {brain_name}: {e}")
 
-#combines all the brains
+# Combine all CSVs into one Prism-ready table
 if all_tables:
     combined = pd.concat(all_tables, ignore_index=True)
-    combined.to_csv(f"{results_dir}/prism_table.csv", index=False)
-
-print("Finished. Prism table saved.")
+    output_file = os.path.join(results_dir, "prism_table.csv")
+    combined.to_csv(output_file, index=False)
+    print(f"\n✅ Finished! Combined Prism table saved to:\n{output_file}")
+else:
+    print("\n⚠️ No data was processed.")
